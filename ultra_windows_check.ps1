@@ -364,7 +364,10 @@ try {
     Log-Message "Failed to generate GPResult report. $_" "Red"
 }
 
-# Export AD password policy if the server is a domain controller
+# Export user and group information
+Export-UserAndGroupInfo -groupsFilePath $groupsFilePath -groupMembersFilePath $groupMembersFilePath
+
+# Check if the server is a domain controller and export AD password policy
 if ((Get-WmiObject -Class Win32_ComputerSystem).DomainRole -eq 5) {
     Export-ADPasswordPolicy -policyFilePath $adPasswordPolicyFilePath
 }
