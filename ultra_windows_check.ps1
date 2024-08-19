@@ -173,80 +173,6 @@ function Export-OpenPortsToHtml {
     }
 }
 
-# Function to export user and group information, including local and AD users
-function Export-UserAndGroupInfo {
-    param (
-        [string]$usersFilePath,
-        [string]$groupsFilePath,
-        [string]$groupMembersFilePath
-    )
-    
-    $localUsers = Get-LocalUser | Select-Object Name, Enabled, LastLogon, PasswordChangeableDate, PasswordExpires, UserMayChangePassword
-    $adUsers = @()
-    try {
-        $adUsers = Get-ADUser -Filter * -Property DisplayName, Enabled, LastLogonDate, PasswordLastSet, PasswordNeverExpires, PasswordExpired | Select-Object DisplayName, Enabled, LastLogonDate, PasswordLastSet, PasswordNeverExpires, PasswordExpired
-    } catch {
-        Log-Message "No Active Directory users found or unable to connect to AD. $_" "Red"
-    }
-
-    $usersHtmlContent = "<h2>Local Users</h2>"
-    $usersHtmlContent += ConvertTo-Html -InputObject $localUsers -Property Name, Enabled, LastLogon, PasswordChangeableDate, PasswordExpires, UserMayChangePassword -Fragment
-
-    if ($adUsers.Count -gt 0) {
-        $usersHtmlContent += "<h2>Active Directory Users</h2>"
-        $usersHtmlContent += ConvertTo-Html -InputObject $adUsers -Property DisplayName, Enabled, LastLogonDate, PasswordLastSet, PasswordNeverExpires, PasswordExpired -Fragment
-    } else {
-        $usersHtmlContent += "<h2>No Active Directory Users Found</h2>"
-    }
-
-    Set-Content -Path $usersFilePath -Value $usersHtmlContent
-    Log-Message "User information exported: $usersFilePath"
-
-    $groups = Get-LocalGroup | Select-Object Name, Description, SID
-    Export-ToHtml -Path $groupsFilePath -InputObject $groups
-
-    $groupMembersContent = ""
-    Get-LocalGroup | ForEach-Object {
-        $groupName = $_.Name
-        $groupMembersContent += "<h2>Group: $groupName</h2><table><tr><th>Members</th></tr>"
-        try {
-            $groupMembers = Get-LocalGroupMember -Group $_ | ForEach-Object { $_.Name }
-            if ($groupMembers.Count -gt 0) {
-                $groupMembers | ForEach-Object {
-                    $groupMembersContent += "<tr><td>$_</td></tr>"
-                }
-            } else {
-                $groupMembersContent += "<tr><td>No users in this group</td></tr>"
-            }
-        } catch {
-            Log-Message "Failed to retrieve members for group $groupName. $_" "Red"
-            $groupMembersContent += "<tr><td>Error retrieving group members</td></tr>"
-        }
-        $groupMembersContent += "</table><br>"
-    }
-    $groupMembersHtml = @"
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h2 { color: #2e6c80; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-        th { background-color: #f2f2f2; color: #333; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        tr:hover { background-color: #f1f1f1; }
-    </style>
-</head>
-<body>
-$groupMembersContent
-</body>
-</html>
-"@
-    Set-Content -Path $groupMembersFilePath -Value $groupMembersHtml
-    Log-Message "Group members list exported: $groupMembersFilePath"
-}
-
 # Function to export AD password policy
 function Export-ADPasswordPolicy {
     param (
@@ -401,7 +327,6 @@ $servicesFilePath = "$folderPath\Services_$serverName.html"
 $updatesFilePath = "$folderPath\InstalledUpdates_$serverName.html"
 $softwareFilePath = "$folderPath\InstalledSoftware_$serverName.html"
 $gpresultFilePath = "$folderPath\GPResult_$serverName.html"
-$usersFilePath = "$folderPath\Users_$serverName.html"
 $groupsFilePath = "$folderPath\Groups_$serverName.html"
 $groupMembersFilePath = "$folderPath\GroupMembers_$serverName.html"
 $windowsFeaturesFilePath = "$folderPath\WindowsFeatures_$serverName.html"
@@ -439,10 +364,7 @@ try {
     Log-Message "Failed to generate GPResult report. $_" "Red"
 }
 
-# Export user and group information
-Export-UserAndGroupInfo -usersFilePath $usersFilePath -groupsFilePath $groupsFilePath -groupMembersFilePath $groupMembersFilePath
-
-# Check if the server is a domain controller and export AD password policy
+# Export AD password policy if the server is a domain controller
 if ((Get-WmiObject -Class Win32_ComputerSystem).DomainRole -eq 5) {
     Export-ADPasswordPolicy -policyFilePath $adPasswordPolicyFilePath
 }
