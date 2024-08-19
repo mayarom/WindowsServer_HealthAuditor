@@ -23,6 +23,45 @@ function Export-ToCsvSafe {
         Log-Message "Failed to export to CSV at $Path. $_" "Red"
     }
 }
+
+# Function to export HTML with styling and error highlighting
+function Export-ToHtml {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [array]$InputObject
+    )
+    $htmlHeader = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h2 { color: #2e6c80; text-align: center; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; color: #333; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        tr:hover { background-color: #f1f1f1; }
+        .error { background-color: #ffcccc; color: red; }
+    </style>
+</head>
+<body>
+"@
+    $htmlFooter = @"
+</body>
+</html>
+"@
+    try {
+        $htmlBody = $InputObject | ConvertTo-Html -Property * -Head $htmlHeader -PostContent $htmlFooter
+        Set-Content -Path $Path -Value $htmlBody -ErrorAction Stop
+        Log-Message "Exported to HTML successfully: $Path"
+    } catch {
+        Log-Message "Failed to export to HTML at $Path. $_" "Red"
+    }
+}
+
 # Function to export user and group information, including local and AD users and groups
 function Export-UserAndGroupInfo {
     param (
@@ -111,155 +150,6 @@ $groupMembersContent
 "@
     Set-Content -Path $groupMembersFilePath -Value $groupMembersHtml
     Log-Message "Group members list exported: $groupMembersFilePath"
-}
-
-# Function to export HTML with styling and error highlighting
-function Export-ToHtml {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [array]$InputObject
-    )
-    $htmlHeader = @"
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h2 { color: #2e6c80; text-align: center; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-        th { background-color: #f2f2f2; color: #333; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        tr:hover { background-color: #f1f1f1; }
-        .error { background-color: #ffcccc; color: red; }
-    </style>
-</head>
-<body>
-"@
-    $htmlFooter = @"
-</body>
-</html>
-"@
-    try {
-        $htmlBody = $InputObject | ConvertTo-Html -Property * -Head $htmlHeader -PostContent $htmlFooter
-        Set-Content -Path $Path -Value $htmlBody -ErrorAction Stop
-        Log-Message "Exported to HTML successfully: $Path"
-    } catch {
-        Log-Message "Failed to export to HTML at $Path. $_" "Red"
-    }
-}
-
-# Function to check for insecure settings and flag them
-function Check-InsecureSettings {
-    param (
-        [array]$Settings
-    )
-    $flaggedSettings = @()
-    foreach ($setting in $Settings) {
-        if ($setting.Name -eq "AnonymousAuthentication" -and $setting.Value -eq $true) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Anonymous Authentication is enabled (Insecure)</td></tr>"
-        } elseif ($setting.Name -eq "RequestFiltering" -and $setting.Value -eq $false) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Request Filtering is disabled (Insecure)</td></tr>"
-        } else {
-            $flaggedSettings += "<tr><td>$($setting.Name)</td><td>$($setting.Value)</td></tr>"
-        }
-    }
-    return $flaggedSettings
-}
-
-# Function to check detailed Microsoft Defender settings
-function Check-DefenderSettings {
-    $defenderStatus = Get-MpComputerStatus
-    $defenderPreferences = Get-MpPreference
-
-    $defenderSettings = @(
-        @{Name = "RealTimeProtectionEnabled"; Value = !$defenderPreferences.DisableRealtimeMonitoring; Issue = "Real-Time Protection is not enabled"},
-        @{Name = "CloudProtectionEnabled"; Value = $defenderPreferences.MAPSReporting -eq "2"; Issue = "Cloud Protection is not enabled"},
-        @{Name = "VirusDefinitionsUpToDate"; Value = $defenderStatus.AntivirusSignatureLastUpdated -gt (Get-Date).AddDays(-7); Issue = "Virus definitions are not up-to-date"},
-        @{Name = "TamperProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"; Issue = "Tamper Protection is not enabled"},
-        @{Name = "PuaProtectionEnabled"; Value = $defenderPreferences.PUAProtection -eq "1"; Issue = "PUA (Potentially Unwanted Application) Protection is not enabled"},
-        @{Name = "BehaviorMonitoringEnabled"; Value = !$defenderPreferences.DisableBehaviorMonitoring; Issue = "Behavior Monitoring is not enabled"},
-        @{Name = "ScriptScanningEnabled"; Value = !$defenderPreferences.DisableScriptScanning; Issue = "Script Scanning is not enabled"},
-        @{Name = "NetworkProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionNetworkProtection -eq "1"; Issue = "Network Protection is not enabled"},
-        @{Name = "RansomwareProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"; Issue = "Ransomware Protection (Controlled Folder Access) is not enabled"},
-        @{Name = "SecurityIntelligenceVersion"; Value = $defenderStatus.AntivirusSignatureVersion; Issue = "Security intelligence definitions are out of date"},
-        @{Name = "FullScanRequired"; Value = !$defenderStatus.FullScanRequired; Issue = "A full scan is required"},
-        @{Name = "FullScanOverdue"; Value = !$defenderStatus.FullScanOverdue; Issue = "Full scan is overdue"},
-        @{Name = "QuickScanOverdue"; Value = !$defenderStatus.QuickScanOverdue; Issue = "Quick scan is overdue"},
-        @{Name = "LastQuickScanDate"; Value = $defenderStatus.LastQuickScanStartTime; Issue = "No recent quick scan found"},
-        @{Name = "LastFullScanDate"; Value = $defenderStatus.LastFullScanStartTime; Issue = "No recent full scan found"},
-        @{Name = "AntivirusEnabled"; Value = $defenderStatus.AntivirusEnabled; Issue = "Antivirus protection is not enabled"},
-        @{Name = "RealTimeProtectionStatus"; Value = $defenderStatus.RealTimeProtectionEnabled; Issue = "Real-Time Protection is not active"},
-        @{Name = "FirewallEnabled"; Value = $defenderStatus.FirewallEnabled; Issue = "Firewall is not enabled"},
-        @{Name = "ExploitProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionEnabled; Issue = "Exploit Protection is not enabled"},
-        @{Name = "ControlledFolderAccess"; Value = $defenderPreferences.EnableControlledFolderAccess; Issue = "Controlled Folder Access is not enabled"}
-    )
-
-    $flaggedSettings = @()
-    foreach ($setting in $defenderSettings) {
-        if ($setting.Value -eq $false) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>$($setting.Issue)</td></tr>"
-        } elseif ($setting.Name -eq "FullScanOverdue" -and $setting.Value -eq $true) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Full scan is overdue</td></tr>"
-        } elseif ($setting.Name -eq "QuickScanOverdue" -and $setting.Value -eq $true) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Quick scan is overdue</td></tr>"
-        } else {
-            $flaggedSettings += "<tr><td>$($setting.Name)</td><td>Enabled/Up-to-date</td></tr>"
-        }
-    }
-    return $flaggedSettings
-}
-
-# Function to export open ports to HTML
-function Export-OpenPortsToHtml {
-    param (
-        [string]$Path,
-        [array]$InputObject
-    )
-
-    $htmlHeader = @"
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h2 { color: #2e6c80; text-align: center; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-        th { background-color: #f2f2f2; color: #333; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        tr:hover { background-color: #f1f1f1; }
-    </style>
-</head>
-<body>
-<h2>Open Ports Report</h2>
-<table>
-    <tr>
-        <th>Local Address</th>
-        <th>Local Port</th>
-        <th>Owning Process</th>
-    </tr>
-"@
-
-    $htmlBody = ""
-    foreach ($port in $InputObject) {
-        $htmlBody += "<tr><td>$($port.LocalAddress)</td><td>$($port.LocalPort)</td><td>$($port.OwningProcess)</td></tr>"
-    }
-
-    $htmlFooter = @"
-</table>
-</body>
-</html>
-"@
-
-    try {
-        Set-Content -Path $Path -Value ($htmlHeader + $htmlBody + $htmlFooter)
-        Log-Message "Open ports list exported: $Path"
-    } catch {
-        Log-Message "Failed to export open ports list to HTML. $_" "Red"
-    }
 }
 
 # Function to export AD password policy
