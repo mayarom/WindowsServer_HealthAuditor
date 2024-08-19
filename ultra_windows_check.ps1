@@ -209,13 +209,18 @@ function Export-UserAndGroupInfo {
     Get-LocalGroup | ForEach-Object {
         $groupName = $_.Name
         $groupMembersContent += "<h2>Group: $groupName</h2><table><tr><th>Members</th></tr>"
-        $groupMembers = Get-LocalGroupMember -Group $_ | Select-Object -ExpandProperty Name
-        if ($groupMembers) {
-            $groupMembers | ForEach-Object {
-                $groupMembersContent += "<tr><td>$_</td></tr>"
+        try {
+            $groupMembers = Get-LocalGroupMember -Group $_ | ForEach-Object { $_.Name }
+            if ($groupMembers.Count -gt 0) {
+                $groupMembers | ForEach-Object {
+                    $groupMembersContent += "<tr><td>$_</td></tr>"
+                }
+            } else {
+                $groupMembersContent += "<tr><td>No users in this group</td></tr>"
             }
-        } else {
-            $groupMembersContent += "<tr><td>No users in this group</td></tr>"
+        } catch {
+            Log-Message "Failed to retrieve members for group $groupName. $_" "Red"
+            $groupMembersContent += "<tr><td>Error retrieving group members</td></tr>"
         }
         $groupMembersContent += "</table><br>"
     }
