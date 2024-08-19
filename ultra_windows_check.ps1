@@ -23,6 +23,95 @@ function Export-ToCsvSafe {
         Log-Message "Failed to export to CSV at $Path. $_" "Red"
     }
 }
+# Function to export user and group information, including local and AD users and groups
+function Export-UserAndGroupInfo {
+    param (
+        [string]$groupsFilePath,
+        [string]$groupMembersFilePath
+    )
+    
+    # Collect local groups
+    $localGroups = Get-LocalGroup | Select-Object Name, Description, SID
+    Export-ToHtml -Path $groupsFilePath -InputObject $localGroups
+
+    # Collect AD groups if applicable
+    $adGroups = @()
+    try {
+        $adGroups = Get-ADGroup -Filter * | Select-Object Name, Description, SID
+        if ($adGroups.Count -gt 0) {
+            $adGroupsHtml = ConvertTo-Html -InputObject $adGroups -Fragment
+            $adGroupsContent = "<h2>Active Directory Groups</h2>" + $adGroupsHtml
+            Add-Content -Path $groupsFilePath -Value $adGroupsContent
+        }
+    } catch {
+        Log-Message "No Active Directory groups found or unable to connect to AD. $_" "Red"
+    }
+
+    # Export group members for local groups
+    $groupMembersContent = ""
+    Get-LocalGroup | ForEach-Object {
+        $groupName = $_.Name
+        $groupMembersContent += "<h2>Group: $groupName</h2><table><tr><th>Members</th></tr>"
+        try {
+            $groupMembers = Get-LocalGroupMember -Group $_ | ForEach-Object { $_.Name }
+            if ($groupMembers.Count -gt 0) {
+                $groupMembers | ForEach-Object {
+                    $groupMembersContent += "<tr><td>$_</td></tr>"
+                }
+            } else {
+                $groupMembersContent += "<tr><td>No users in this group</td></tr>"
+            }
+        } catch {
+            Log-Message "Failed to retrieve members for group $groupName. $_" "Red"
+            $groupMembersContent += "<tr><td>Error retrieving group members</td></tr>"
+        }
+        $groupMembersContent += "</table><br>"
+    }
+
+    # Export group members for AD groups if applicable
+    if ($adGroups.Count -gt 0) {
+        $adGroups | ForEach-Object {
+            $groupName = $_.Name
+            $groupMembersContent += "<h2>AD Group: $groupName</h2><table><tr><th>Members</th></tr>"
+            try {
+                $adGroupMembers = Get-ADGroupMember -Identity $_.Name | ForEach-Object { $_.Name }
+                if ($adGroupMembers.Count -gt 0) {
+                    $adGroupMembers | ForEach-Object {
+                        $groupMembersContent += "<tr><td>$_</td></tr>"
+                    }
+                } else {
+                    $groupMembersContent += "<tr><td>No users in this group</td></tr>"
+                }
+            } catch {
+                Log-Message "Failed to retrieve members for AD group $groupName. $_" "Red"
+                $groupMembersContent += "<tr><td>Error retrieving AD group members</td></tr>"
+            }
+            $groupMembersContent += "</table><br>"
+        }
+    }
+
+    $groupMembersHtml = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h2 { color: #2e6c80; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; color: #333; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        tr:hover { background-color: #f1f1f1; }
+    </style>
+</head>
+<body>
+$groupMembersContent
+</body>
+</html>
+"@
+    Set-Content -Path $groupMembersFilePath -Value $groupMembersHtml
+    Log-Message "Group members list exported: $groupMembersFilePath"
+}
 
 # Function to export HTML with styling and error highlighting
 function Export-ToHtml {
