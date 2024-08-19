@@ -85,30 +85,34 @@ function Check-DefenderSettings {
     $defenderPreferences = Get-MpPreference
 
     $defenderSettings = @(
-        @{Name = "RealTimeProtectionEnabled"; Value = !$defenderPreferences.DisableRealtimeMonitoring},
-        @{Name = "CloudProtectionEnabled"; Value = $defenderPreferences.MAPSReporting -eq "2"},
-        @{Name = "VirusDefinitionsUpToDate"; Value = $defenderStatus.AntivirusSignatureLastUpdated -gt (Get-Date).AddDays(-7)},
-        @{Name = "TamperProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"},
-        @{Name = "PuaProtectionEnabled"; Value = $defenderPreferences.PUAProtection -eq "1"},
-        @{Name = "BehaviorMonitoringEnabled"; Value = !$defenderPreferences.DisableBehaviorMonitoring},
-        @{Name = "ScriptScanningEnabled"; Value = !$defenderPreferences.DisableScriptScanning},
-        @{Name = "NetworkProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionNetworkProtection -eq "1"},
-        @{Name = "RansomwareProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"},
-        @{Name = "SecurityIntelligenceVersion"; Value = $defenderStatus.AntivirusSignatureVersion},
-        @{Name = "FullScanRequired"; Value = $defenderStatus.FullScanRequired},
-        @{Name = "FullScanOverdue"; Value = $defenderStatus.FullScanOverdue},
-        @{Name = "QuickScanOverdue"; Value = $defenderStatus.QuickScanOverdue},
-        @{Name = "LastQuickScanDate"; Value = $defenderStatus.LastQuickScanStartTime},
-        @{Name = "LastFullScanDate"; Value = $defenderStatus.LastFullScanStartTime},
-        @{Name = "AntivirusEnabled"; Value = $defenderStatus.AntivirusEnabled}
+        @{Name = "RealTimeProtectionEnabled"; Value = !$defenderPreferences.DisableRealtimeMonitoring; Issue = "Real-Time Protection is disabled"},
+        @{Name = "CloudProtectionEnabled"; Value = $defenderPreferences.MAPSReporting -eq "2"; Issue = "Cloud Protection is disabled"},
+        @{Name = "VirusDefinitionsUpToDate"; Value = $defenderStatus.AntivirusSignatureLastUpdated -gt (Get-Date).AddDays(-7); Issue = "Virus definitions are out of date"},
+        @{Name = "TamperProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"; Issue = "Tamper Protection is disabled"},
+        @{Name = "PuaProtectionEnabled"; Value = $defenderPreferences.PUAProtection -eq "1"; Issue = "PUA (Potentially Unwanted Application) Protection is disabled"},
+        @{Name = "BehaviorMonitoringEnabled"; Value = !$defenderPreferences.DisableBehaviorMonitoring; Issue = "Behavior Monitoring is disabled"},
+        @{Name = "ScriptScanningEnabled"; Value = !$defenderPreferences.DisableScriptScanning; Issue = "Script Scanning is disabled"},
+        @{Name = "NetworkProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionNetworkProtection -eq "1"; Issue = "Network Protection is disabled"},
+        @{Name = "RansomwareProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"; Issue = "Ransomware Protection (Controlled Folder Access) is disabled"},
+        @{Name = "SecurityIntelligenceVersion"; Value = $defenderStatus.AntivirusSignatureVersion; Issue = "Security intelligence definitions are out of date"},
+        @{Name = "FullScanRequired"; Value = !$defenderStatus.FullScanRequired; Issue = "A full scan is required"},
+        @{Name = "FullScanOverdue"; Value = !$defenderStatus.FullScanOverdue; Issue = "Full scan is overdue"},
+        @{Name = "QuickScanOverdue"; Value = !$defenderStatus.QuickScanOverdue; Issue = "Quick scan is overdue"},
+        @{Name = "LastQuickScanDate"; Value = $defenderStatus.LastQuickScanStartTime; Issue = "No recent quick scan found"},
+        @{Name = "LastFullScanDate"; Value = $defenderStatus.LastFullScanStartTime; Issue = "No recent full scan found"},
+        @{Name = "AntivirusEnabled"; Value = $defenderStatus.AntivirusEnabled; Issue = "Antivirus protection is disabled"},
+        @{Name = "RealTimeProtectionStatus"; Value = $defenderStatus.RealTimeProtectionEnabled; Issue = "Real-Time Protection is not active"},
+        @{Name = "FirewallEnabled"; Value = $defenderStatus.FirewallEnabled; Issue = "Firewall is disabled"},
+        @{Name = "ExploitProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionEnabled; Issue = "Exploit Protection is disabled"},
+        @{Name = "ControlledFolderAccess"; Value = $defenderPreferences.EnableControlledFolderAccess; Issue = "Controlled Folder Access is disabled"}
     )
 
     $flaggedSettings = @()
     foreach ($setting in $defenderSettings) {
         if ($setting.Value -eq $false -or ($setting.Name -eq "FullScanOverdue" -and $setting.Value -eq $true) -or ($setting.Name -eq "QuickScanOverdue" -and $setting.Value -eq $true)) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Not enabled, overdue, or not up-to-date (Insecure)</td></tr>"
+            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>$($setting.Issue)</td></tr>"
         } else {
-            $flaggedSettings += "<tr><td>$($setting.Name)</td><td>$($setting.Value)</td></tr>"
+            $flaggedSettings += "<tr><td>$($setting.Name)</td><td>Enabled/Up-to-date</td></tr>"
         }
     }
     return $flaggedSettings
