@@ -78,45 +78,49 @@ function Check-InsecureSettings {
     }
     return $flaggedSettings
 }
-
 # Function to check detailed Microsoft Defender settings
 function Check-DefenderSettings {
     $defenderStatus = Get-MpComputerStatus
     $defenderPreferences = Get-MpPreference
 
     $defenderSettings = @(
-        @{Name = "RealTimeProtectionEnabled"; Value = !$defenderPreferences.DisableRealtimeMonitoring},
-        @{Name = "CloudProtectionEnabled"; Value = $defenderPreferences.MAPSReporting -eq "2"},
-        @{Name = "VirusDefinitionsUpToDate"; Value = $defenderStatus.AntivirusSignatureLastUpdated -gt (Get-Date).AddDays(-7)},
-        @{Name = "TamperProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"},
-        @{Name = "PuaProtectionEnabled"; Value = $defenderPreferences.PUAProtection -eq "1"},
-        @{Name = "BehaviorMonitoringEnabled"; Value = !$defenderPreferences.DisableBehaviorMonitoring},
-        @{Name = "ScriptScanningEnabled"; Value = !$defenderPreferences.DisableScriptScanning},
-        @{Name = "NetworkProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionNetworkProtection -eq "1"},
-        @{Name = "RansomwareProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"},
-        @{Name = "SecurityIntelligenceVersion"; Value = $defenderStatus.AntivirusSignatureVersion},
-        @{Name = "FullScanRequired"; Value = $defenderStatus.FullScanRequired},
-        @{Name = "FullScanOverdue"; Value = $defenderStatus.FullScanOverdue},
-        @{Name = "QuickScanOverdue"; Value = $defenderStatus.QuickScanOverdue},
-        @{Name = "LastQuickScanDate"; Value = $defenderStatus.LastQuickScanStartTime},
-        @{Name = "LastFullScanDate"; Value = $defenderStatus.LastFullScanStartTime},
-        @{Name = "AntivirusEnabled"; Value = $defenderStatus.AntivirusEnabled},
-        @{Name = "RealTimeProtectionStatus"; Value = $defenderStatus.RealTimeProtectionEnabled},
-        @{Name = "FirewallEnabled"; Value = $defenderStatus.FirewallEnabled},
-        @{Name = "ExploitProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionEnabled},
-        @{Name = "ControlledFolderAccess"; Value = $defenderPreferences.EnableControlledFolderAccess}
+        @{Name = "RealTimeProtectionEnabled"; Value = !$defenderPreferences.DisableRealtimeMonitoring; Issue = "Real-Time Protection is not enabled"},
+        @{Name = "CloudProtectionEnabled"; Value = $defenderPreferences.MAPSReporting -eq "2"; Issue = "Cloud Protection is not enabled"},
+        @{Name = "VirusDefinitionsUpToDate"; Value = $defenderStatus.AntivirusSignatureLastUpdated -gt (Get-Date).AddDays(-7); Issue = "Virus definitions are not up-to-date"},
+        @{Name = "TamperProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"; Issue = "Tamper Protection is not enabled"},
+        @{Name = "PuaProtectionEnabled"; Value = $defenderPreferences.PUAProtection -eq "1"; Issue = "PUA (Potentially Unwanted Application) Protection is not enabled"},
+        @{Name = "BehaviorMonitoringEnabled"; Value = !$defenderPreferences.DisableBehaviorMonitoring; Issue = "Behavior Monitoring is not enabled"},
+        @{Name = "ScriptScanningEnabled"; Value = !$defenderPreferences.DisableScriptScanning; Issue = "Script Scanning is not enabled"},
+        @{Name = "NetworkProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionNetworkProtection -eq "1"; Issue = "Network Protection is not enabled"},
+        @{Name = "RansomwareProtectionEnabled"; Value = $defenderPreferences.EnableControlledFolderAccess -eq "Enabled"; Issue = "Ransomware Protection (Controlled Folder Access) is not enabled"},
+        @{Name = "SecurityIntelligenceVersion"; Value = $defenderStatus.AntivirusSignatureVersion; Issue = "Security intelligence definitions are out of date"},
+        @{Name = "FullScanRequired"; Value = !$defenderStatus.FullScanRequired; Issue = "A full scan is required"},
+        @{Name = "FullScanOverdue"; Value = !$defenderStatus.FullScanOverdue; Issue = "Full scan is overdue"},
+        @{Name = "QuickScanOverdue"; Value = !$defenderStatus.QuickScanOverdue; Issue = "Quick scan is overdue"},
+        @{Name = "LastQuickScanDate"; Value = $defenderStatus.LastQuickScanStartTime; Issue = "No recent quick scan found"},
+        @{Name = "LastFullScanDate"; Value = $defenderStatus.LastFullScanStartTime; Issue = "No recent full scan found"},
+        @{Name = "AntivirusEnabled"; Value = $defenderStatus.AntivirusEnabled; Issue = "Antivirus protection is not enabled"},
+        @{Name = "RealTimeProtectionStatus"; Value = $defenderStatus.RealTimeProtectionEnabled; Issue = "Real-Time Protection is not active"},
+        @{Name = "FirewallEnabled"; Value = $defenderStatus.FirewallEnabled; Issue = "Firewall is not enabled"},
+        @{Name = "ExploitProtectionEnabled"; Value = $defenderPreferences.ExploitProtectionEnabled; Issue = "Exploit Protection is not enabled"},
+        @{Name = "ControlledFolderAccess"; Value = $defenderPreferences.EnableControlledFolderAccess; Issue = "Controlled Folder Access is not enabled"}
     )
 
     $flaggedSettings = @()
     foreach ($setting in $defenderSettings) {
-        if ($setting.Value -eq $false -or ($setting.Name -eq "FullScanOverdue" -and $setting.Value -eq $true) -or ($setting.Name -eq "QuickScanOverdue" -and $setting.Value -eq $true)) {
-            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Not enabled, overdue, or not up-to-date (Insecure)</td></tr>"
+        if ($setting.Value -eq $false) {
+            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>$($setting.Issue)</td></tr>"
+        } elseif ($setting.Name -eq "FullScanOverdue" -and $setting.Value -eq $true) {
+            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Full scan is overdue</td></tr>"
+        } elseif ($setting.Name -eq "QuickScanOverdue" -and $setting.Value -eq $true) {
+            $flaggedSettings += "<tr class='error'><td>$($setting.Name)</td><td>Quick scan is overdue</td></tr>"
         } else {
-            $flaggedSettings += "<tr><td>$($setting.Name)</td><td>$($setting.Value)</td></tr>"
+            $flaggedSettings += "<tr><td>$($setting.Name)</td><td>Enabled/Up-to-date</td></tr>"
         }
     }
     return $flaggedSettings
 }
+
 
 # Function to export user and group information, including local and AD users
 function Export-UserAndGroupInfo {
@@ -319,10 +323,62 @@ if ((Get-WmiObject -Class Win32_ComputerSystem).DomainRole -eq 5) {
     Export-ADPasswordPolicy -policyFilePath $adPasswordPolicyFilePath
 }
 
+# Function to export open ports to HTML
+function Export-OpenPortsToHtml {
+    param (
+        [string]$Path,
+        [array]$InputObject
+    )
+
+    $htmlHeader = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h2 { color: #2e6c80; text-align: center; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; color: #333; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        tr:hover { background-color: #f1f1f1; }
+        .error { background-color: #ffcccc; color: red; }
+    </style>
+</head>
+<body>
+<h2>Open Ports Report</h2>
+<table>
+    <tr>
+        <th>Local Address</th>
+        <th>Local Port</th>
+        <th>Owning Process</th>
+    </tr>
+"@
+
+    $htmlBody = ""
+    foreach ($port in $InputObject) {
+        $htmlBody += "<tr><td>$($port.LocalAddress)</td><td>$($port.LocalPort)</td><td>$($port.OwningProcess)</td></tr>"
+    }
+
+    $htmlFooter = @"
+</table>
+</body>
+</html>
+"@
+
+    try {
+        Set-Content -Path $Path -Value ($htmlHeader + $htmlBody + $htmlFooter)
+        Log-Message "Open ports list exported: $Path"
+    } catch {
+        Log-Message "Failed to export open ports list to HTML. $_" "Red"
+    }
+}
+
 # Get a list of all listening ports and export them to an HTML file
 Log-Message "Exporting listening ports list..."
 $openPorts = Get-NetTCPConnection | Where-Object { $_.State -eq 'Listen' } | Select-Object LocalAddress, LocalPort, OwningProcess
-Export-ToHtml -Path $openPortsFilePath -InputObject $openPorts
+Export-OpenPortsToHtml -Path $openPortsFilePath -InputObject $openPorts
+
 
 # Get a list of all shared folders on the server and export them to an HTML file
 Log-Message "Exporting shared folders list..."
