@@ -11,6 +11,8 @@ $installedSoftwarePath = Join-Path $folderPath "InstalledSoftware_$serverName.ht
 $updateHistoryPath = Join-Path $folderPath "UpdateHistory_$serverName.html"
 $localUsersPath = Join-Path $folderPath "LocalUsers_$serverName.html"
 $systemInfoPath = Join-Path $folderPath "SystemInfo_$serverName.html"
+$defenderConfigFilePath = Join-Path $folderPath "DefenderConfig_$serverName.html"
+$iisConfigFilePath = Join-Path $folderPath "IIS_SecurityConfig_$serverName.html"
 
 # בדיקת הרשאות מנהל
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -124,31 +126,6 @@ function Export-GPOSettings {
             Remove-Item "$env:TEMP\secpol.cfg" -Force
         }
 
-        # System Access Policies
-        $systemPolicies = @(
-            "SePasswordComplexity",
-            "SePasswordComplexityEnabled",
-            "SeMinimumPasswordLength",
-            "SeMaximumPasswordAge",
-            "SeMinimumPasswordAge",
-            "SeLockoutBadCount",
-            "SeLockoutDuration"
-        )
-
-        foreach ($policy in $systemPolicies) {
-            try {
-                $value = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name $policy -ErrorAction SilentlyContinue).$policy
-                if ($null -ne $value) {
-                    $gpoSettings += [PSCustomObject]@{
-                        Category = "System Access Policy"
-                        Setting = $policy
-                        Value = $value
-                    }
-                }
-            }
-            catch {}
-        }
-
         # Audit Policies
         $auditPolicies = auditpol /get /category:* /r | ConvertFrom-Csv
         foreach ($policy in $auditPolicies) {
@@ -185,7 +162,6 @@ function Export-InstalledSoftware {
             Where-Object DisplayName -ne $null
 
         $sortedSoftware = $software | Sort-Object DisplayName | ForEach-Object {
-            # Convert InstallDate to readable format if possible
             if ($_.InstallDate -match '(\d{4})(\d{2})(\d{2})') {
                 $installDate = "$($matches[1])-$($matches[2])-$($matches[3])"
             }
@@ -208,7 +184,6 @@ function Export-InstalledSoftware {
         Log-Message "Error exporting installed software information: $_" "Red"
     }
 }
-
 # Function to export update history
 function Export-UpdateHistory {
     param (
@@ -258,19 +233,27 @@ function Export-LocalUsers {
             $lastPasswordSet = if ($user.PasswordLastSet) { $user.PasswordLastSet.ToString("yyyy-MM-dd HH:mm:ss") } else { "Never" }
             $passwordExpires = if ($user.PasswordExpires) { $user.PasswordExpires.ToString("yyyy-MM-dd HH:mm:ss") } else { "Never" }
             
-            # Extract last logon from net user output
             $lastLogon = ($userInfo | Where-Object { $_ -match "Last logon" }) -replace "Last logon", "" -replace "\s+", " "
 
+            # Get additional user details using WMI
+            $userSID = $user.SID.Value
+            $userProfile = Get-CimInstance -ClassName Win32_UserProfile -Filter "SID='$userSID'" -ErrorAction SilentlyContinue
+            
             [PSCustomObject]@{
                 'Username' = $user.Name
+                'Full Name' = $user.FullName
                 'Enabled' = $user.Enabled
                 'Description' = $user.Description
                 'Created' = $user.Created.ToString("yyyy-MM-dd HH:mm:ss")
                 'Last Password Set' = $lastPasswordSet
                 'Password Expires' = $passwordExpires
                 'Password Required' = $user.PasswordRequired
+                'Password Never Expires' = $user.PasswordNeverExpires
+                'User May Change Password' = $user.UserMayChangePassword
+                'Account Locked Out' = $user.Locked
                 'Last Logon' = $lastLogon.Trim()
                 'Account Expires' = if ($user.AccountExpires) { $user.AccountExpires.ToString("yyyy-MM-dd HH:mm:ss") } else { "Never" }
+                'Profile Path' = if ($userProfile) { $userProfile.LocalPath } else { "N/A" }
             }
         }
 
@@ -293,6 +276,9 @@ function Export-SystemInformation {
         $os = Get-CimInstance Win32_OperatingSystem
         $cs = Get-CimInstance Win32_ComputerSystem
         $bios = Get-CimInstance Win32_BIOS
+        $processor = Get-CimInstance Win32_Processor
+        $disk = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+        $network = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPAddress -ne $null }
         
         $systemInfo = [PSCustomObject]@{
             'Computer Name' = $env:COMPUTERNAME
@@ -304,12 +290,37 @@ function Export-SystemInformation {
             'System Manufacturer' = $cs.Manufacturer
             'System Model' = $cs.Model
             'BIOS Version' = $bios.SMBIOSBIOSVersion
+            'Processor' = $processor.Name
             'Total Physical Memory (GB)' = [math]::Round($cs.TotalPhysicalMemory/1GB, 2)
+            'Free Physical Memory (GB)' = [math]::Round($os.FreePhysicalMemory/1MB, 2)
             'Domain' = $cs.Domain
             'Time Zone' = (Get-TimeZone).DisplayName
+            'System Local Time' = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         }
 
-        Export-ToHtml -Path $Path -InputObject $systemInfo -Title "System Information"
+        # Add disk information
+        $diskInfo = $disk | ForEach-Object {
+            [PSCustomObject]@{
+                'Drive' = $_.DeviceID
+                'Size (GB)' = [math]::Round($_.Size/1GB, 2)
+                'Free Space (GB)' = [math]::Round($_.FreeSpace/1GB, 2)
+                'Free Space (%)' = [math]::Round(($_.FreeSpace/$_.Size)*100, 2)
+            }
+        }
+
+        # Add network information
+        $networkInfo = $network | ForEach-Object {
+            [PSCustomObject]@{
+                'Adapter' = $_.Description
+                'IP Address' = ($_.IPAddress -join ', ')
+                'Subnet Mask' = ($_.IPSubnet -join ', ')
+                'Default Gateway' = ($_.DefaultIPGateway -join ', ')
+                'DNS Servers' = ($_.DNSServerSearchOrder -join ', ')
+                'DHCP Enabled' = $_.DHCPEnabled
+            }
+        }
+
+        Export-ToHtml -Path $Path -InputObject @($systemInfo, $diskInfo, $networkInfo) -Title "System Information"
         Log-Message "System information exported successfully"
     }
     catch {
@@ -317,17 +328,134 @@ function Export-SystemInformation {
     }
 }
 
-# Main execution
+# Function to check Windows Defender
+function Check-WindowsDefender {
+    param (
+        [string]$Path
+    )
+    
+    Log-Message "Checking Microsoft Defender settings..."
+    
+    try {
+        # Check if Windows Defender service exists and is running
+        $defenderService = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+        if (-not $defenderService) {
+            throw "Windows Defender service not found"
+        }
+
+        $defenderSettings = @()
+        
+        # Get Defender status using CIM
+        try {
+            $mpComputerStatus = Get-CimInstance -Namespace "root/microsoft/windows/defender" -ClassName MSFT_MpComputerStatus -ErrorAction Stop
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Service Status"
+                Value = $defenderService.Status
+            }
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Real-time Protection"
+                Value = if ($mpComputerStatus.RealTimeProtectionEnabled) { "Enabled" } else { "Disabled" }
+            }
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Anti-virus Enabled"
+                Value = if ($mpComputerStatus.AntivirusEnabled) { "Yes" } else { "No" }
+            }
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Anti-spyware Enabled"
+                Value = if ($mpComputerStatus.AntispywareEnabled) { "Yes" } else { "No" }
+            }
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Last Scan Time"
+                Value = $mpComputerStatus.LastScanTime
+            }
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Last Quick Scan Time"
+                Value = $mpComputerStatus.LastQuickScanTime
+            }
+            $defenderSettings += [PSCustomObject]@{
+                Setting = "Last Full Scan Time"
+                Value = $mpComputerStatus.LastFullScanTime
+            }
+        }
+        catch {
+            Log-Message "Could not retrieve Defender status via WMI. Trying alternative method..." "Yellow"
+        }
+
+        # Get additional info from registry
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Windows Defender"
+        if (Test-Path $regPath) {
+            $regSettings = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+            if ($regSettings) {
+                $defenderSettings += [PSCustomObject]@{
+                    Setting = "Installation Path"
+                    Value = $regSettings.InstallLocation
+                }
+                $defenderSettings += [PSCustomObject]@{
+                    Setting = "Product Version"
+                    Value = $regSettings.ProductVersion
+                }
+            }
+        }
+
+        # Check definition updates
+        $defPath = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Signature Updates"
+        if (Test-Path $defPath) {
+            $sigSettings = Get-ItemProperty -Path $defPath -ErrorAction SilentlyContinue
+            if ($sigSettings) {
+                $defenderSettings += [PSCustomObject]@{
+                    Setting = "Last Definition Update"
+                    Value = if ($sigSettings.SignatureLastUpdated) { 
+                        [datetime]::FromFileTime($sigSettings.SignatureLastUpdated).ToString("yyyy-MM-dd HH:mm:ss")
+                    } else { "Unknown" }
+                }
+            }
+        }
+
+        if ($defenderSettings.Count -eq 0) {
+            throw "No Defender settings could be retrieved"
+        }
+
+        Export-ToHtml -Path $Path -InputObject $defenderSettings -Title "Microsoft Defender Settings"
+        Log-Message "Microsoft Defender settings exported successfully"
+    }
+    catch {
+        Log-Message "Error checking Windows Defender: $_" "Red"
+        
+        $errorHtml = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h2 { color: #2e6c80; }
+        .error { color: red; padding: 10px; border: 1px solid red; background-color: #ffebee; }
+    </style>
+</head>
+<body>
+<h2>Microsoft Defender Settings - Error Report</h2>
+<div class="error">
+    <p>Failed to retrieve Windows Defender settings: $($_.Exception.Message)</p>
+    <p>Please check if Windows Defender is installed and running on this system.</p>
+</div>
+</body>
+</html>
+"@
+        Set-Content -Path $Path -Value $errorHtml
+    }
+}
+
+# Main execution block
 try {
     Log-Message "Starting security audit..."
     
-    # יצירת מערך של משימות והרצתן
+    # Create and execute task array
     $tasks = @(
         @{ Name = "GPO Settings"; Action = { Export-GPOSettings -Path $gpoFilePath } },
         @{ Name = "Installed Software"; Action = { Export-InstalledSoftware -Path $installedSoftwarePath } },
         @{ Name = "Update History"; Action = { Export-UpdateHistory -Path $updateHistoryPath } },
         @{ Name = "Local Users"; Action = { Export-LocalUsers -Path $localUsersPath } },
-        @{ Name = "System Information"; Action = { Export-SystemInformation -Path $systemInfoPath } }
+        @{ Name = "System Information"; Action = { Export-SystemInformation -Path $systemInfoPath } },
+        @{ Name = "Windows Defender Settings"; Action = { Check-WindowsDefender -Path $defenderConfigFilePath } }
     )
 
     foreach ($task in $tasks) {
@@ -354,6 +482,10 @@ try {
         .success { color: green; }
         .warning { color: orange; }
         .error { color: red; }
+        ul { list-style-type: none; padding-left: 0; }
+        li { margin: 10px 0; }
+        a { color: #2e6c80; text-decoration: none; }
+        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -371,7 +503,8 @@ try {
     # Add links to generated reports
     $reports = Get-ChildItem -Path $folderPath -Filter "*.html" | Where-Object { $_.Name -ne "SecurityAudit_Summary.html" }
     foreach ($report in $reports) {
-        $mainReportContent += "<li><a href=`"$($report.Name)`">$($report.Name)</a></li>`n"
+        $reportName = $report.Name -replace '\.html$' -replace "_$serverName"
+        $mainReportContent += "<li><a href=`"$($report.Name)`">$reportName</a></li>`n"
     }
 
     $mainReportContent += @"
@@ -387,7 +520,7 @@ try {
     Log-Message "Security audit completed successfully."
     Log-Message "All reports have been saved to: $folderPath"
     
-# פתיחת תיקיית הדוחות
+    # Open reports folder
     try {
         Start-Process explorer.exe -ArgumentList $folderPath
     }
@@ -399,115 +532,5 @@ catch {
     Log-Message "An error occurred during the audit process: $_" "Red"
 }
 finally {
-    # Reset ErrorActionPreference to default
     $ErrorActionPreference = "Continue"
 }
-
-# הוספת סיכום ממצאים חשובים
-$summaryPath = Join-Path $folderPath "SecurityFindings_Summary.html"
-try {
-    $criticalFindings = @()
-
-    # בדיקת עדכונים אחרונים
-    $lastUpdate = Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1
-    $daysSinceLastUpdate = (Get-Date) - $lastUpdate.InstalledOn
-    if ($daysSinceLastUpdate.Days -gt 30) {
-        $criticalFindings += [PSCustomObject]@{
-            Category = "Updates"
-            Finding = "No security updates installed in the last 30 days"
-            Severity = "High"
-            Recommendation = "Install all pending security updates"
-        }
-    }
-
-    # בדיקת משתמשים לא פעילים
-    $inactiveThreshold = (Get-Date).AddDays(-90)
-    $inactiveUsers = Get-LocalUser | Where-Object {
-        $_.Enabled -and $_.LastLogon -ne $null -and $_.LastLogon -lt $inactiveThreshold
-    }
-    if ($inactiveUsers) {
-        $criticalFindings += [PSCustomObject]@{
-            Category = "User Accounts"
-            Finding = "Found $($inactiveUsers.Count) inactive user accounts (no login for 90+ days)"
-            Severity = "Medium"
-            Recommendation = "Review and disable inactive accounts"
-        }
-    }
-
-    # בדיקת מדיניות סיסמאות
-    $passwordPolicy = Get-LocalSecurityPolicy
-    if ($passwordPolicy.PasswordComplexity -eq 0) {
-        $criticalFindings += [PSCustomObject]@{
-            Category = "Password Policy"
-            Finding = "Password complexity is not enforced"
-            Severity = "High"
-            Recommendation = "Enable password complexity requirements"
-        }
-    }
-
-    if ($criticalFindings.Count -gt 0) {
-        $summaryContent = @"
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h1, h2 { color: #2e6c80; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .High { background-color: #ffebee; }
-        .Medium { background-color: #fff3e0; }
-        .Low { background-color: #e8f5e9; }
-    </style>
-</head>
-<body>
-<h1>Critical Security Findings</h1>
-<table>
-    <tr>
-        <th>Category</th>
-        <th>Finding</th>
-        <th>Severity</th>
-        <th>Recommendation</th>
-    </tr>
-"@
-
-        foreach ($finding in $criticalFindings) {
-            $summaryContent += @"
-    <tr class="$($finding.Severity)">
-        <td>$($finding.Category)</td>
-        <td>$($finding.Finding)</td>
-        <td>$($finding.Severity)</td>
-        <td>$($finding.Recommendation)</td>
-    </tr>
-"@
-        }
-
-        $summaryContent += @"
-</table>
-</body>
-</html>
-"@
-
-        Set-Content -Path $summaryPath -Value $summaryContent
-        Log-Message "Critical findings summary generated: $summaryPath"
-    }
-}
-catch {
-    Log-Message "Error generating critical findings summary: $_" "Red"
-}
-
-# Function to get local security policy
-function Get-LocalSecurityPolicy {
-    $securityPolicy = @{}
-    $secpolContent = secedit /export /cfg "$env:TEMP\secpol.cfg" 2>&1
-    if (Test-Path "$env:TEMP\secpol.cfg") {
-        Get-Content "$env:TEMP\secpol.cfg" | ForEach-Object {
-            if ($_ -match '(.+?)=(.+)') {
-                $securityPolicy[$matches[1].Trim()] = $matches[2].Trim()
-            }
-        }
-        Remove-Item "$env:TEMP\secpol.cfg" -Force
-    }
-    return [PSCustomObject]$securityPolicy
-}    
