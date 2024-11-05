@@ -387,4 +387,127 @@ try {
     Log-Message "Security audit completed successfully."
     Log-Message "All reports have been saved to: $folderPath"
     
-    
+# פתיחת תיקיית הדוחות
+    try {
+        Start-Process explorer.exe -ArgumentList $folderPath
+    }
+    catch {
+        Log-Message "Failed to open reports folder. Please navigate to: $folderPath" "Yellow"
+    }
+}
+catch {
+    Log-Message "An error occurred during the audit process: $_" "Red"
+}
+finally {
+    # Reset ErrorActionPreference to default
+    $ErrorActionPreference = "Continue"
+}
+
+# הוספת סיכום ממצאים חשובים
+$summaryPath = Join-Path $folderPath "SecurityFindings_Summary.html"
+try {
+    $criticalFindings = @()
+
+    # בדיקת עדכונים אחרונים
+    $lastUpdate = Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1
+    $daysSinceLastUpdate = (Get-Date) - $lastUpdate.InstalledOn
+    if ($daysSinceLastUpdate.Days -gt 30) {
+        $criticalFindings += [PSCustomObject]@{
+            Category = "Updates"
+            Finding = "No security updates installed in the last 30 days"
+            Severity = "High"
+            Recommendation = "Install all pending security updates"
+        }
+    }
+
+    # בדיקת משתמשים לא פעילים
+    $inactiveThreshold = (Get-Date).AddDays(-90)
+    $inactiveUsers = Get-LocalUser | Where-Object {
+        $_.Enabled -and $_.LastLogon -ne $null -and $_.LastLogon -lt $inactiveThreshold
+    }
+    if ($inactiveUsers) {
+        $criticalFindings += [PSCustomObject]@{
+            Category = "User Accounts"
+            Finding = "Found $($inactiveUsers.Count) inactive user accounts (no login for 90+ days)"
+            Severity = "Medium"
+            Recommendation = "Review and disable inactive accounts"
+        }
+    }
+
+    # בדיקת מדיניות סיסמאות
+    $passwordPolicy = Get-LocalSecurityPolicy
+    if ($passwordPolicy.PasswordComplexity -eq 0) {
+        $criticalFindings += [PSCustomObject]@{
+            Category = "Password Policy"
+            Finding = "Password complexity is not enforced"
+            Severity = "High"
+            Recommendation = "Enable password complexity requirements"
+        }
+    }
+
+    if ($criticalFindings.Count -gt 0) {
+        $summaryContent = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1, h2 { color: #2e6c80; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .High { background-color: #ffebee; }
+        .Medium { background-color: #fff3e0; }
+        .Low { background-color: #e8f5e9; }
+    </style>
+</head>
+<body>
+<h1>Critical Security Findings</h1>
+<table>
+    <tr>
+        <th>Category</th>
+        <th>Finding</th>
+        <th>Severity</th>
+        <th>Recommendation</th>
+    </tr>
+"@
+
+        foreach ($finding in $criticalFindings) {
+            $summaryContent += @"
+    <tr class="$($finding.Severity)">
+        <td>$($finding.Category)</td>
+        <td>$($finding.Finding)</td>
+        <td>$($finding.Severity)</td>
+        <td>$($finding.Recommendation)</td>
+    </tr>
+"@
+        }
+
+        $summaryContent += @"
+</table>
+</body>
+</html>
+"@
+
+        Set-Content -Path $summaryPath -Value $summaryContent
+        Log-Message "Critical findings summary generated: $summaryPath"
+    }
+}
+catch {
+    Log-Message "Error generating critical findings summary: $_" "Red"
+}
+
+# Function to get local security policy
+function Get-LocalSecurityPolicy {
+    $securityPolicy = @{}
+    $secpolContent = secedit /export /cfg "$env:TEMP\secpol.cfg" 2>&1
+    if (Test-Path "$env:TEMP\secpol.cfg") {
+        Get-Content "$env:TEMP\secpol.cfg" | ForEach-Object {
+            if ($_ -match '(.+?)=(.+)') {
+                $securityPolicy[$matches[1].Trim()] = $matches[2].Trim()
+            }
+        }
+        Remove-Item "$env:TEMP\secpol.cfg" -Force
+    }
+    return [PSCustomObject]$securityPolicy
+}    
